@@ -38,6 +38,7 @@
       <section class="toolbar">
         <div>
           <span id="userBadge">未入席</span>
+          <button id="accountButton" class="ghost small" type="button">我的账户</button>
           <button id="logout" class="ghost small">离席</button>
         </div>
         <div id="adminTools" class="admin-tools hidden">
@@ -46,6 +47,16 @@
         </div>
       </section>
       <section id="inviteBox" class="invite-box hidden"></section>
+      <section id="accountPanel" class="panel account-panel hidden">
+        <div class="account-head">
+          <div>
+            <p class="eyebrow">MY ACCOUNT</p>
+            <h2>我的账户</h2>
+          </div>
+          <button id="closeAccount" class="ghost small" type="button">收起</button>
+        </div>
+        <div id="accountSummary" class="account-summary"><span class="hint">点击“我的账户”查看你的汤谱与汤局记录。</span></div>
+      </section>
       <section class="panel soup-library">
         <div class="library-head">
           <div>

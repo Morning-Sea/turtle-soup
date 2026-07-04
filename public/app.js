@@ -64,6 +64,59 @@ async function submitAuth(event) {
   finally { $('authSubmit').disabled = false; }
 }
 
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+function formatDate(timestamp) {
+  if (!timestamp) return '未知时间';
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp));
+}
+function renderAccountSummary(data) {
+  const box = $('accountSummary');
+  const cases = data.recentCases || [];
+  const roomCounts = data.roomCounts || { total: 0, created: 0, participated: 0 };
+  box.innerHTML = `
+    <div class="account-user">
+      <b>${escapeHtml(data.user.name)}</b>
+      <span>${escapeHtml(data.user.email)}</span>
+      <small>${data.user.role === 'admin' ? '掌柜' : '来客'}</small>
+    </div>
+    <div class="account-stats">
+      <div class="stat-card"><span>上传总数</span><b>${data.caseCounts.total}</b></div>
+      <div class="stat-card"><span>公开汤</span><b>${data.caseCounts.public}</b></div>
+      <div class="stat-card"><span>私有汤</span><b>${data.caseCounts.private}</b></div>
+      <div class="stat-card"><span>相关汤局</span><b>${roomCounts.total}</b><small>创建 ${roomCounts.created} · 参与 ${roomCounts.participated}</small></div>
+    </div>
+    <div class="account-recent">
+      <h3>最近上传</h3>
+      <div class="account-case-list">
+        ${cases.length ? cases.map((item) => `
+          <button class="account-case ghost" type="button" data-case-id="${item.id}">
+            <b>${escapeHtml(item.title)}</b>
+            <span>${escapeHtml(item.soup)}</span>
+            <small>${item.visibility === 'public' ? '公开' : '私有'} · ${formatDate(item.createdAt)}</small>
+          </button>
+        `).join('') : '<span class="hint">你还没有上传过海龟汤。</span>'}
+      </div>
+    </div>
+  `;
+  box.querySelectorAll('[data-case-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = cases.find((candidate) => candidate.id === button.dataset.caseId);
+      if (item) chooseCase(item);
+    });
+  });
+}
+async function loadAccountSummary() {
+  const panel = $('accountPanel');
+  const box = $('accountSummary');
+  show(panel, true);
+  box.innerHTML = '<span class="hint">正在翻你的账册……</span>';
+  try { renderAccountSummary(await request('/api/account/summary')); }
+  catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
+}
+
 function chooseCase(item) {
   selectedCase = item; activeRoom = null; clearInterval(roomPoll);
   setText('selectedCaseName', item.title || '无题之汤'); show($('modePanel'), true);
@@ -89,10 +142,10 @@ async function loadCommunity() {
     box.innerHTML = data.cases.length ? '' : '<span class="hint">社区还没有公开汤，先上传一锅吧。</span>';
     data.cases.forEach((item) => {
       const card = document.createElement('button'); card.type = 'button'; card.className = 'case-option ghost';
-      card.innerHTML = `<b>${item.title}</b><span>${item.soup}</span><small>${item.visibility === 'public' ? '公开' : '私有'} · ${item.ownerName}</small>`;
+      card.innerHTML = `<b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.soup)}</span><small>${item.visibility === 'public' ? '公开' : '私有'} · ${item.ownerName}</small>`;
       card.addEventListener('click', async () => chooseCase((await request(`/api/cases/${item.id}`)).case)); box.appendChild(card);
     });
-  } catch (error) { box.innerHTML = `<span class="hint">${error.message}</span>`; }
+  } catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
 }
 async function startRoom(playMode) {
   if (!selectedCase) return add('keeper', '请先选择或创建一锅汤。');
@@ -118,6 +171,8 @@ async function createInvite() {
 
 $('authForm').addEventListener('submit', submitAuth);
 $('loginSwitch').addEventListener('click', () => { if (mode === 'login') { const token = prompt('贴上掌柜给你的请帖链接或尾码'); if (token) { const parsed = token.includes('invite=') ? new URL(token).searchParams.get('invite') : token.trim(); $('inviteToken').value = parsed; params.set('invite', parsed); configureGate({ hasAdmin: true }); } return; } params.delete('invite'); configureGate({ hasAdmin: true }); });
+$('accountButton').addEventListener('click', loadAccountSummary);
+$('closeAccount').addEventListener('click', () => show($('accountPanel'), false));
 $('logout').addEventListener('click', async () => { await post('/api/auth/logout', {}); currentUser = null; activeRoom = null; clearInterval(roomPoll); await loadStatus(); });
 $('createInvite').addEventListener('click', createInvite); $('newCase').addEventListener('click', newCase); $('refreshCommunity').addEventListener('click', loadCommunity); $('customCaseForm').addEventListener('submit', saveCustomCase);
 $('startSingle').addEventListener('click', () => startRoom('single')); $('startMulti').addEventListener('click', () => startRoom('multi'));

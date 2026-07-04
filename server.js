@@ -367,6 +367,33 @@ app.post('/api/auth/register', async (request, reply) => {
 });
 
 
+
+app.get('/api/account/summary', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const store = await readStore();
+  const userCases = store.cases.filter((item) => item.ownerId === user.id);
+  const relatedRooms = store.rooms.filter((room) => room.createdBy === user.id || room.players?.some((player) => player.id === user.id));
+  return {
+    user,
+    caseCounts: {
+      total: userCases.length,
+      public: userCases.filter((item) => item.visibility === 'public').length,
+      private: userCases.filter((item) => item.visibility !== 'public').length,
+    },
+    recentCases: userCases
+      .slice()
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 6)
+      .map((item) => publicCase(item, true)),
+    roomCounts: {
+      total: relatedRooms.length,
+      created: store.rooms.filter((room) => room.createdBy === user.id).length,
+      participated: store.rooms.filter((room) => room.players?.some((player) => player.id === user.id)).length,
+    },
+  };
+});
+
 app.get('/api/cases/community', async (request, reply) => {
   const user = await requireAuth(request, reply);
   if (!user) return null;
