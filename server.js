@@ -375,7 +375,7 @@ app.get('/api/cases/community', async (request, reply) => {
     .filter((item) => item.visibility === 'public' || item.ownerId === user.id)
     .slice(-60)
     .reverse()
-    .map((item) => publicCase(item, item.ownerId === user.id));
+    .map((item) => publicCase(item, false));
   return { cases };
 });
 
@@ -384,7 +384,7 @@ app.get('/api/cases/:id', async (request, reply) => {
   const user = await requireAuth(request, reply);
   if (!user) return null;
   const store = await readStore();
-  const item = store.cases.find((candidate) => candidate.id === request.params.id && (candidate.visibility === 'public' || candidate.ownerId === user.id));
+  const item = store.cases.find((candidate) => candidate.id === request.params.id && candidate.ownerId === user.id);
   if (!item) return reply.code(404).send({ error: '这锅汤不存在或无权查看。' });
   return { case: publicCase(item, true) };
 });
@@ -409,11 +409,14 @@ app.post('/api/cases/custom', async (request, reply) => {
 app.post('/api/rooms', async (request, reply) => {
   const user = await requireAuth(request, reply);
   if (!user) return null;
-  const selectedCase = request.body?.case;
   const mode = request.body?.mode === 'multi' ? 'multi' : 'single';
-  if (!selectedCase?.soup || !selectedCase?.truth) return reply.code(400).send({ error: '请先选择或创建一锅完整的汤。' });
+  const submittedCase = request.body?.case;
+  const caseId = normalizeText(request.body?.caseId, 80);
   const token = makeToken(18);
   const room = await withStore(async (store) => {
+    const storedCase = caseId ? store.cases.find((candidate) => candidate.id === caseId && (candidate.visibility === 'public' || candidate.ownerId === user.id)) : null;
+    const selectedCase = caseId ? storedCase : submittedCase;
+    if (!selectedCase?.soup || !selectedCase?.truth) return { error: '请先选择或创建一锅完整的汤。' };
     const item = {
       id: crypto.randomUUID(),
       token,
@@ -436,6 +439,7 @@ app.post('/api/rooms', async (request, reply) => {
     store.rooms.push(item);
     return item;
   });
+  if (room.error) return reply.code(400).send({ error: room.error });
   return { room: publicRoom(room, user) };
 });
 
