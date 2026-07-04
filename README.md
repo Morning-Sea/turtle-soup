@@ -40,8 +40,12 @@ docker run -d --name turtle-soup --restart unless-stopped \
   -e OPENAI_BASE_URL=https://api.openai.com/v1 \
   -e OPENAI_API_KEY=你的密钥 \
   -e OPENAI_MODEL=gpt-4o-mini \
+  -e OPENAI_REASONING_EFFORT=medium \
+  -e OPENAI_MAX_TOKENS=1200 \
   turtle-soup
 ```
+
+`OPENAI_REASONING_EFFORT` 和 `OPENAI_MAX_TOKENS` 为可选配置；如果你的 OpenAI-compatible 服务不支持 `reasoning_effort`，请不要设置 `OPENAI_REASONING_EFFORT`。
 
 ### 直接运行
 

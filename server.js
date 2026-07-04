@@ -13,6 +13,8 @@ const HOST = process.env.HOST || '0.0.0.0';
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const OPENAI_REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || '';
+const OPENAI_MAX_TOKENS = Number(process.env.OPENAI_MAX_TOKENS || 0);
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_HOURS || 168) * 60 * 60 * 1000;
@@ -213,13 +215,16 @@ function systemPrompt() {
 
 async function askModel(messages, temperature = 0.75) {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured');
+  const body = { model: OPENAI_MODEL, temperature, messages };
+  if (OPENAI_REASONING_EFFORT) body.reasoning_effort = OPENAI_REASONING_EFFORT;
+  if (OPENAI_MAX_TOKENS > 0) body.max_completion_tokens = OPENAI_MAX_TOKENS;
   const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${OPENAI_API_KEY}`,
     },
-    body: JSON.stringify({ model: OPENAI_MODEL, temperature, messages }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`model request failed: ${res.status} ${await res.text()}`);
   const json = await res.json();
