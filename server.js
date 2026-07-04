@@ -389,6 +389,20 @@ app.get('/api/cases/:id', async (request, reply) => {
   return { case: publicCase(item, true) };
 });
 
+app.delete('/api/cases/:id', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const result = await withStore(async (store) => {
+    const index = store.cases.findIndex((candidate) => candidate.id === request.params.id);
+    if (index < 0) return { status: 404, error: '这锅汤不存在。' };
+    if (store.cases[index].ownerId !== user.id) return { status: 403, error: '只能删除自己的海龟汤。' };
+    store.cases.splice(index, 1);
+    return { ok: true };
+  });
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
+  return { ok: true };
+});
+
 app.post('/api/cases/custom', async (request, reply) => {
   const user = await requireAuth(request, reply);
   if (!user) return null;

@@ -23,6 +23,7 @@ async function request(url, options = {}) {
   return data;
 }
 function post(url, body) { return request(url, { method: 'POST', body: JSON.stringify(body) }); }
+function del(url) { return request(url, { method: 'DELETE' }); }
 
 function configureGate(status) {
   const invite = params.get('invite') || '';
@@ -88,9 +89,23 @@ async function loadCommunity() {
     const data = await request('/api/cases/community');
     box.innerHTML = data.cases.length ? '' : '<span class="hint">社区还没有公开汤，先上传一锅吧。</span>';
     data.cases.forEach((item) => {
-      const card = document.createElement('button'); card.type = 'button'; card.className = 'case-option ghost';
-      card.innerHTML = `<b>${item.title}</b><span>${item.soup}</span><small>${item.visibility === 'public' ? '公开' : '私有'} · ${item.ownerName}</small>`;
-      card.addEventListener('click', async () => chooseCase((await request(`/api/cases/${item.id}`)).case)); box.appendChild(card);
+      const card = document.createElement('article'); card.className = 'case-option ghost';
+      const choose = document.createElement('button'); choose.type = 'button'; choose.className = 'case-select';
+      choose.innerHTML = `<b>${item.title}</b><span>${item.soup}</span><small>${item.visibility === 'public' ? '公开' : '私有'} · ${item.ownerName}</small>`;
+      choose.addEventListener('click', async () => chooseCase((await request(`/api/cases/${item.id}`)).case));
+      card.appendChild(choose);
+      if (item.ownerId === currentUser?.id) {
+        const actions = document.createElement('div'); actions.className = 'case-actions';
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger small'; remove.textContent = '删除';
+        remove.addEventListener('click', async () => {
+          if (!confirm(`确定删除《${item.title}》吗？`)) return;
+          remove.disabled = true;
+          try { await del(`/api/cases/${item.id}`); await loadCommunity(); }
+          catch (error) { alert(error.message); remove.disabled = false; }
+        });
+        actions.appendChild(remove); card.appendChild(actions);
+      }
+      box.appendChild(card);
     });
   } catch (error) { box.innerHTML = `<span class="hint">${error.message}</span>`; }
 }
