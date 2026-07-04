@@ -396,10 +396,11 @@ app.post('/api/cases/custom', async (request, reply) => {
   const soup = normalizeText(request.body?.soup, 1200);
   const truth = normalizeText(request.body?.truth, 2000);
   const visibility = request.body?.visibility === 'public' ? 'public' : 'private';
+  const source = ['ai', 'local', 'user'].includes(request.body?.source) ? request.body.source : 'user';
   const rules = normalizeText(request.body?.rules || '', 600).split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 5);
   if (!soup || !truth) return reply.code(400).send({ error: '请填写汤面和汤底。' });
   const item = await withStore(async (store) => {
-    const saved = { id: crypto.randomUUID(), title, soup, truth, rules, visibility, source: 'user', ownerId: user.id, ownerName: user.name, createdAt: Date.now() };
+    const saved = { id: crypto.randomUUID(), title, soup, truth, rules, visibility, source, ownerId: user.id, ownerName: user.name, createdAt: Date.now() };
     store.cases.push(saved);
     return saved;
   });
