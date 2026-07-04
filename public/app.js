@@ -1,15 +1,25 @@
-const API_BASE = '';
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+let mode = 'login';
 let currentUser = null;
-let currentRoom = null;
 let selectedCase = null;
+let activeRoom = null;
+let roomPoll = null;
 
+function show(node, visible = true) { node.classList.toggle('hidden', !visible); }
+function setText(id, value) { $(id).textContent = value; }
+function add(role, content, name = '') {
+  const node = document.createElement('div');
+  node.className = `msg ${role === 'player' ? 'player' : 'keeper'}`;
+  node.textContent = name ? `${name}：${content}` : content;
+  $('log').appendChild(node);
+  $('log').scrollTop = $('log').scrollHeight;
+}
 async function request(url, options = {}) {
-  const token = localStorage.getItem('turtle_token');
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE}${url}`, { ...options, headers });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || '请求失败');
+  const res = await fetch(url, { credentials: 'same-origin', ...options, headers: { 'content-type': 'application/json', ...(options.headers || {}) } });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) throw new Error(data.error || text || '请求失败');
   return data;
 }
 function post(url, body) { return request(url, { method: 'POST', body: JSON.stringify(body) }); }
@@ -17,143 +27,111 @@ function del(url) { return request(url, { method: 'DELETE' }); }
 
 function configureGate(status) {
   const invite = params.get('invite') || '';
-  $('loginInvite').value = invite; $('registerInvite').value = invite;
-  $('loginForm').classList.toggle('hidden', status === 'register');
-  $('registerForm').classList.toggle('hidden', status === 'login');
-}
-
-const params = new URLSearchParams(window.location.search);
-if (params.get('invite')) configureGate('register');
-
-async function checkAuth() {
-  if (!localStorage.getItem('turtle_token')) return false;
-  try {
-    const data = await request('/api/auth/me');
-    currentUser = data.user;
-    $('userBadge').textContent = `${currentUser.name}`;
-    $('gate').classList.add('hidden');
-    return true;
-  } catch (error) {
-    localStorage.removeItem('turtle_token');
-    return false;
+  $('inviteToken').value = invite;
+  show($('gate'), true); show($('app'), false);
+  $('authPassword').value = '';
+  if (!status.hasAdmin) {
+    mode = 'admin'; setText('gateEyebrow', '掌柜登记'); setText('gateTitle', '第一晚，只认一位掌柜');
+    setText('gateText', '设置汤馆主人。之后所有来客都必须拿到你生成的一次性请帖。'); setText('authSubmit', '登记掌柜');
+    setText('loginSwitch', '已有席位，改为登录'); $('authName').closest('label').classList.remove('hidden'); return;
   }
+  if (invite) {
+    mode = 'register'; setText('gateEyebrow', '凭帖入席'); setText('gateTitle', '请帖只亮一次');
+    setText('gateText', '填好名号、邮箱和暗号。登记完成后，这张请帖就会失效。'); setText('authSubmit', '接受请帖');
+    setText('loginSwitch', '已有席位，改为登录'); $('authName').closest('label').classList.remove('hidden'); return;
+  }
+  mode = 'login'; setText('gateEyebrow', '夜渡入席'); setText('gateTitle', '请先报上暗号');
+  setText('gateText', '汤馆不接待陌生脚步。若你还没有席位，请向掌柜索取一次性请帖。'); setText('authSubmit', '入席');
+  setText('loginSwitch', '我拿到了请帖'); $('authName').closest('label').classList.add('hidden');
 }
 
-async function login(event) {
+async function enterApp(user) {
+  currentUser = user; show($('gate'), false); show($('app'), true);
+  setText('userBadge', `${user.name} · ${user.role === 'admin' ? '掌柜' : '来客'}`); show($('adminTools'), user.role === 'admin');
+  await loadCommunity();
+  if (params.get('room')) await joinRoom(params.get('room'));
+}
+async function loadStatus() {
+  const status = await request('/api/auth/status');
+  if (status.user) await enterApp(status.user); else configureGate(status);
+}
+async function submitAuth(event) {
   event.preventDefault();
-  try {
-    const data = await post('/api/auth/login', {
-      name: $('loginName').value, pass: $('loginPass').value, invite: $('loginInvite').value
+  const body = { name: $('authName').value.trim(), email: $('authEmail').value.trim(), password: $('authPassword').value, inviteToken: $('inviteToken').value };
+  const endpoint = mode === 'admin' ? '/api/auth/admin' : mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+  $('authSubmit').disabled = true;
+  try { const data = await post(endpoint, body); await enterApp(data.user); if (!params.get('room')) window.history.replaceState({}, '', location.pathname); }
+  catch (error) { setText('authHint', error.message); }
+  finally { $('authSubmit').disabled = false; }
+}
+
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+function formatDate(timestamp) {
+  if (!timestamp) return '未知时间';
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp));
+}
+function renderAccountSummary(data) {
+  const box = $('accountSummary');
+  const cases = data.recentCases || [];
+  const roomCounts = data.roomCounts || { total: 0, created: 0, participated: 0 };
+  box.innerHTML = `
+    <div class="account-user">
+      <b>${escapeHtml(data.user.name)}</b>
+      <span>${escapeHtml(data.user.email)}</span>
+      <small>${data.user.role === 'admin' ? '掌柜' : '来客'}</small>
+    </div>
+    <div class="account-stats">
+      <div class="stat-card"><span>上传总数</span><b>${data.caseCounts.total}</b></div>
+      <div class="stat-card"><span>公开汤</span><b>${data.caseCounts.public}</b></div>
+      <div class="stat-card"><span>私有汤</span><b>${data.caseCounts.private}</b></div>
+      <div class="stat-card"><span>相关汤局</span><b>${roomCounts.total}</b><small>创建 ${roomCounts.created} · 参与 ${roomCounts.participated}</small></div>
+    </div>
+    <div class="account-recent">
+      <h3>最近上传</h3>
+      <div class="account-case-list">
+        ${cases.length ? cases.map((item) => `
+          <button class="account-case ghost" type="button" data-case-id="${item.id}">
+            <b>${escapeHtml(item.title)}</b>
+            <span>${escapeHtml(item.soup)}</span>
+            <small>${item.visibility === 'public' ? '公开' : '私有'} · ${formatDate(item.createdAt)}</small>
+          </button>
+        `).join('') : '<span class="hint">你还没有上传过海龟汤。</span>'}
+      </div>
+    </div>
+  `;
+  box.querySelectorAll('[data-case-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = cases.find((candidate) => candidate.id === button.dataset.caseId);
+      if (item) chooseCase(item);
     });
-    localStorage.setItem('turtle_token', data.token);
-    window.location.search = '';
-  } catch (error) { alert(error.message); }
+  });
 }
-
-async function register(event) {
-  event.preventDefault();
-  try {
-    const data = await post('/api/auth/register', {
-      name: $('registerName').value, pass: $('registerPass').value, invite: $('registerInvite').value
-    });
-    localStorage.setItem('turtle_token', data.token);
-    window.location.search = '';
-  } catch (error) { alert(error.message); }
-}
-
-function logout() { localStorage.removeItem('turtle_token'); window.location.reload(); }
-
-function escapeHtml(unsafe) {
-  if (typeof unsafe !== 'string') return unsafe;
-  return unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-}
-
-function formatDate(isoString) {
-  const date = new Date(isoString);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
-
 async function loadAccountSummary() {
   const panel = $('accountPanel');
-  if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
-  panel.classList.remove('hidden');
-  const box = $('accountSummary'); box.innerHTML = '<span class="hint">正在获取账号摘要...</span>';
-  try {
-    const data = await request('/api/account/summary');
-    renderAccountSummary(data);
-  } catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
+  const box = $('accountSummary');
+  show(panel, true);
+  box.innerHTML = '<span class="hint">正在翻你的账册……</span>';
+  try { renderAccountSummary(await request('/api/account/summary')); }
+  catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
 }
 
-function renderAccountSummary(data) {
-  const box = $('accountSummary'); box.innerHTML = '';
-  const userDiv = document.createElement('div'); userDiv.className = 'account-user';
-  userDiv.innerHTML = `<b>${escapeHtml(data.user.name)}</b><span>管理员: ${data.user.isAdmin ? '是' : '否'}</span><small>加入于 ${formatDate(data.user.createdAt)}</small>`;
-  box.appendChild(userDiv);
-
-  const statsDiv = document.createElement('div'); statsDiv.className = 'account-stats';
-  statsDiv.innerHTML = `
-    <div class="stat-card"><span>总上传海龟汤</span><b>${data.caseCounts.total}</b><small>公开: ${data.caseCounts.public} | 私有: ${data.caseCounts.private}</small></div>
-    <div class="stat-card"><span>主持过的房间</span><b>${data.roomCounts.hosted}</b></div>
-    <div class="stat-card"><span>游玩过的房间</span><b>${data.roomCounts.played}</b></div>
-  `;
-  box.appendChild(statsDiv);
-
-  if (data.recentCases.length > 0) {
-    const recentSection = document.createElement('div'); recentSection.className = 'account-recent';
-    recentSection.innerHTML = '<h3>最近上传</h3><div class="account-case-list"></div>';
-    const list = recentSection.querySelector('.account-case-list');
-    data.recentCases.forEach(item => {
-      const card = document.createElement('button'); card.type = 'button'; card.className = 'account-case ghost';
-      card.innerHTML = `<b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.soup)}</span><small>${item.visibility === 'public' ? '公开' : '私有'} · ${formatDate(item.createdAt)}</small>`;
-      card.addEventListener('click', async () => chooseCase((await request(`/api/cases/${item.id}`)).case));
-      list.appendChild(card);
-    });
-    box.appendChild(recentSection);
-  }
+function chooseCase(item) {
+  selectedCase = item; activeRoom = null; clearInterval(roomPoll);
+  setText('selectedCaseName', item.title || '无题之汤'); show($('modePanel'), true);
+  setText('source', item.source === 'ai' ? '本锅现熬' : item.source === 'user' ? (item.visibility === 'public' ? '社区汤' : '私房汤') : '本地秘方');
+  setText('title', item.title); setText('soup', item.soup); $('log').innerHTML = ''; show($('roomBar'), false);
+  add('keeper', '已选好汤。请选择单人游玩，或开一桌多人汤局。');
 }
-
-async function createInvite() {
-  try {
-    const data = await post('/api/auth/invite', {});
-    $('inviteResult').innerHTML = `<b>邀请码已生成：</b><br><code>${location.origin}/?invite=${data.invite}</code><br><span class="hint">可供注册一次。</span>`;
-  } catch (error) { alert(error.message); }
+async function newCase() {
+  $('newCase').disabled = true; setText('newCase', '煨汤中…');
+  try { const data = await post('/api/case', { mood: $('mood').value, difficulty: $('difficulty').value }); chooseCase({ ...data.case, source: data.source }); }
+  catch (error) { add('keeper', `锅底裂了：${error.message}`); }
+  finally { $('newCase').disabled = false; setText('newCase', 'AI / 本地开一锅'); }
 }
-
-function $(id) { return document.getElementById(id); }
-
-async function saveSelectedCase(visibility) {
-  if (!selectedCase || !selectedCase.truth) return alert('当前没有包含汤底的海龟汤可保存。');
-  const btn = $('saveSelectedCase'); btn.disabled = true;
-  try {
-    const data = await post('/api/cases/custom', {
-      title: selectedCase.title, soup: selectedCase.soup, truth: selectedCase.truth, rules: selectedCase.rules, visibility: visibility, source: selectedCase.source || 'user'
-    });
-    chooseCase(data.case); await loadCommunity();
-    alert('已成功保存到云端。');
-  } catch (error) { alert(error.message); }
-  btn.disabled = false;
-}
-
-function chooseCase(c) {
-  selectedCase = c;
-  $('selectedCaseName').textContent = c.title || '未命名汤';
-  $('soupLibrary').classList.add('hidden');
-  $('modePanel').classList.remove('hidden');
-  if (selectedCase.truth) {
-    $('saveSelectedCaseControls').classList.remove('hidden');
-  } else {
-    $('saveSelectedCaseControls').classList.add('hidden');
-  }
-}
-
-function unchooseCase() {
-  selectedCase = null;
-  $('selectedCaseName').textContent = '未选择';
-  $('soupLibrary').classList.remove('hidden');
-  $('modePanel').classList.add('hidden');
-}
-
-async function uploadCustom(event) {
+async function saveCustomCase(event) {
   event.preventDefault();
   const data = await post('/api/cases/custom', { title: $('customTitle').value, soup: $('customSoup').value, truth: $('customTruth').value, rules: $('customRules').value, visibility: $('customVisibility').value });
   chooseCase(data.case); await loadCommunity(); event.target.reset();
@@ -167,13 +145,7 @@ async function loadCommunity() {
       const card = document.createElement('article'); card.className = 'case-option ghost';
       const choose = document.createElement('button'); choose.type = 'button'; choose.className = 'case-select';
       choose.innerHTML = `<b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.soup)}</span><small>${item.visibility === 'public' ? '公开' : '私有'} · ${escapeHtml(item.ownerName)}</small>`;
-      choose.addEventListener('click', async () => {
-        if (item.ownerId === currentUser?.id) {
-          chooseCase((await request(`/api/cases/${item.id}`)).case);
-        } else {
-          chooseCase({ id: item.id, title: item.title, soup: item.soup, source: item.source });
-        }
-      });
+      choose.addEventListener('click', async () => chooseCase((await request(`/api/cases/${item.id}`)).case));
       card.appendChild(choose);
       if (item.ownerId === currentUser?.id) {
         const actions = document.createElement('div'); actions.className = 'case-actions';
@@ -190,168 +162,36 @@ async function loadCommunity() {
     });
   } catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
 }
-
-async function createRoom(mode) {
-  if (!selectedCase) return alert('请先选择一锅汤');
-  try {
-    let payload = { mode };
-    if (selectedCase.id && !selectedCase.truth) { payload.caseId = selectedCase.id; }
-    else { payload.case = selectedCase; }
-    const data = await post('/api/rooms', payload);
-    currentRoom = data.room;
-    renderRoom();
-    pollRoom();
-  } catch (error) { alert(error.message); }
+async function startRoom(playMode) {
+  if (!selectedCase) return add('keeper', '请先选择或创建一锅汤。');
+  const data = await post('/api/rooms', { mode: playMode, case: selectedCase });
+  renderRoom(data.room); if (playMode === 'multi') history.replaceState({}, '', `?room=${data.room.token}`);
+}
+async function joinRoom(token) { const data = await post(`/api/rooms/${token}/join`, {}); renderRoom(data.room); startPolling(token); }
+function startPolling(token) { clearInterval(roomPoll); roomPoll = setInterval(async () => { try { renderRoom((await request(`/api/rooms/${token}`)).room, true); } catch {} }, 3000); }
+function renderRoom(room, silent = false) {
+  activeRoom = room; selectedCase = null; show($('modePanel'), false); show($('roomBar'), true);
+  setText('source', room.mode === 'multi' ? '多人汤局' : '单人汤局'); setText('title', room.case.title); setText('soup', room.case.soup);
+  $('roomBar').innerHTML = `<b>${room.mode === 'multi' ? '多人' : '单人'}模式</b><span>座次：${room.players.map((p) => p.name).join(' → ') || '等待入席'}</span>${room.mode === 'multi' ? `<code>${room.inviteUrl}</code>` : ''}<span>${room.isMyTurn ? '轮到你了' : '等待别人提问'}</span>`;
+  $('log').innerHTML = ''; room.history.forEach((item) => add(item.role, item.content, item.role === 'player' ? item.name : ''));
+  show($('passTurn'), room.mode === 'multi'); $('askButton').disabled = room.mode === 'multi' && !room.isMyTurn; $('passTurn').disabled = room.mode === 'multi' && !room.isMyTurn;
+  if (!silent && room.mode === 'multi') navigator.clipboard?.writeText(room.inviteUrl).catch(() => {});
+}
+async function createInvite() {
+  $('createInvite').disabled = true;
+  try { const data = await post('/api/invites', { note: $('inviteNote').value.trim() }); $('inviteBox').innerHTML = `<b>请帖已写好</b><code>${data.invite.url}</code><span>复制给一位来客。用过即焚，七日后自灭。</span>`; show($('inviteBox'), true); await navigator.clipboard?.writeText(data.invite.url).catch(() => {}); }
+  catch (error) { $('inviteBox').textContent = error.message; show($('inviteBox'), true); }
+  finally { $('createInvite').disabled = false; }
 }
 
-async function joinRoom(event) {
-  event.preventDefault();
-  const roomId = $('joinRoomId').value.trim();
-  if (!roomId) return;
-  try {
-    const data = await post(`/api/rooms/${roomId}/join`, {});
-    currentRoom = data.room;
-    renderRoom();
-    pollRoom();
-  } catch (error) { alert(error.message); }
-}
-
-function renderRoom() {
-  $('soupLibrary').classList.add('hidden');
-  $('modePanel').classList.add('hidden');
-  $('saveSelectedCaseControls').classList.add('hidden');
-  $('roomPlay').classList.remove('hidden');
-  if (currentUser.isAdmin) {
-    $('adminPanel').classList.add('hidden');
-  }
-
-  $('roomIdDisplay').textContent = currentRoom.id;
-  $('roomTitle').textContent = currentRoom.case.title || '未命名汤';
-  $('roomSoup').textContent = currentRoom.case.soup || '';
-  
-  const rulesBox = $('roomRules');
-  if (currentRoom.case.rules) {
-    rulesBox.classList.remove('hidden');
-    rulesBox.innerHTML = `<b>附加规则：</b><span>${escapeHtml(currentRoom.case.rules)}</span>`;
-  } else { rulesBox.classList.add('hidden'); }
-
-  const isKeeper = currentRoom.keeperId === currentUser.id;
-  $('keeperView').classList.toggle('hidden', !isKeeper);
-  $('playerView').classList.toggle('hidden', isKeeper);
-
-  if (isKeeper) {
-    $('keeperTruth').textContent = currentRoom.case.truth || '';
-    $('keeperMode').textContent = currentRoom.mode === 'ai' ? 'AI 守门' : '人工守门';
-  }
-
-  $('gameStatus').textContent = currentRoom.status === 'solved' ? '✅ 汤底已揭开' : '🤔 仍在解谜中';
-  if (currentRoom.status === 'solved') {
-    $('playerAsk').classList.add('hidden');
-    $('solvedView').classList.remove('hidden');
-    $('solvedTruth').textContent = currentRoom.case.truth || '';
-  } else {
-    $('playerAsk').classList.remove('hidden');
-    $('solvedView').classList.add('hidden');
-  }
-
-  renderLogs();
-}
-
-function renderLogs() {
-  const box = $('roomLog');
-  box.innerHTML = '';
-  currentRoom.logs.forEach(log => {
-    const div = document.createElement('div');
-    if (log.role === 'keeper') {
-      div.className = 'msg keeper';
-      div.innerHTML = `<b>守门人</b><br><span>${escapeHtml(log.content)}</span>`;
-    } else {
-      div.className = 'msg player';
-      div.innerHTML = `<b>${escapeHtml(log.playerName || '玩家')}</b><br><span>${escapeHtml(log.content)}</span>`;
-    }
-    box.appendChild(div);
-  });
-  box.scrollTop = box.scrollHeight;
-}
-
-async function askQuestion(event) {
-  event.preventDefault();
-  const content = $('askInput').value.trim();
-  if (!content) return;
-  const btn = event.target.querySelector('button');
-  btn.disabled = true; $('askInput').disabled = true;
-  try {
-    const data = await post(`/api/rooms/${currentRoom.id}/ask`, { content });
-    currentRoom = data.room;
-    $('askInput').value = '';
-    renderRoom();
-  } catch (error) { alert(error.message); }
-  btn.disabled = false; $('askInput').disabled = false; $('askInput').focus();
-}
-
-async function keeperReply(content) {
-  if (currentRoom.status === 'solved') return;
-  try {
-    const data = await post(`/api/rooms/${currentRoom.id}/reply`, { content });
-    currentRoom = data.room;
-    renderRoom();
-  } catch (error) { alert(error.message); }
-}
-
-async function markSolved() {
-  if (!confirm('确定要揭开汤底，结束本局吗？')) return;
-  try {
-    const data = await post(`/api/rooms/${currentRoom.id}/solve`, {});
-    currentRoom = data.room;
-    renderRoom();
-  } catch (error) { alert(error.message); }
-}
-
-async function leaveRoom() {
-  currentRoom = null;
-  $('roomPlay').classList.add('hidden');
-  $('soupLibrary').classList.remove('hidden');
-  if (currentUser.isAdmin) {
-    $('adminPanel').classList.remove('hidden');
-  }
-}
-
-let pollTimer = null;
-function pollRoom() {
-  if (pollTimer) clearTimeout(pollTimer);
-  if (!currentRoom) return;
-  pollTimer = setTimeout(async () => {
-    try {
-      const data = await request(`/api/rooms/${currentRoom.id}`);
-      currentRoom = data.room;
-      renderRoom();
-    } catch (e) {
-      if (e.message.includes('不存在')) {
-        alert('房间已关闭'); leaveRoom(); return;
-      }
-    }
-    pollRoom();
-  }, 3000);
-}
-
-document.addEventListener('DOMContentLoaded', async () => {
-  $('loginForm').addEventListener('submit', login);
-  $('registerForm').addEventListener('submit', register);
-  $('logoutBtn').addEventListener('click', logout);
-  $('customForm').addEventListener('submit', uploadCustom);
-  $('createAiBtn').addEventListener('click', () => createRoom('ai'));
-  $('createHumanBtn').addEventListener('click', () => createRoom('human'));
-  $('joinForm').addEventListener('submit', joinRoom);
-  $('playerAsk').addEventListener('submit', askQuestion);
-  
-  if (await checkAuth()) {
-    if (currentUser.isAdmin) $('adminPanel').classList.remove('hidden');
-    await loadCommunity();
-    const joined = params.get('join');
-    if (joined) {
-      $('joinRoomId').value = joined;
-      joinRoom(new Event('submit'));
-      window.history.replaceState({}, '', '/');
-    }
-  }
-});
+$('authForm').addEventListener('submit', submitAuth);
+$('loginSwitch').addEventListener('click', () => { if (mode === 'login') { const token = prompt('贴上掌柜给你的请帖链接或尾码'); if (token) { const parsed = token.includes('invite=') ? new URL(token).searchParams.get('invite') : token.trim(); $('inviteToken').value = parsed; params.set('invite', parsed); configureGate({ hasAdmin: true }); } return; } params.delete('invite'); configureGate({ hasAdmin: true }); });
+$('accountButton').addEventListener('click', loadAccountSummary);
+$('closeAccount').addEventListener('click', () => show($('accountPanel'), false));
+$('logout').addEventListener('click', async () => { await post('/api/auth/logout', {}); currentUser = null; activeRoom = null; clearInterval(roomPoll); await loadStatus(); });
+$('createInvite').addEventListener('click', createInvite); $('newCase').addEventListener('click', newCase); $('refreshCommunity').addEventListener('click', loadCommunity); $('customCaseForm').addEventListener('submit', saveCustomCase);
+$('startSingle').addEventListener('click', () => startRoom('single')); $('startMulti').addEventListener('click', () => startRoom('multi'));
+$('reveal').addEventListener('click', () => { if (activeRoom?.revealed) add('keeper', `揭晓：${activeRoom.revealed}`); else if (selectedCase) add('keeper', `揭晓：${selectedCase.truth}`); else add('keeper', '请在追问框输入“揭晓答案”，由老板揭开汤底。'); });
+$('passTurn').addEventListener('click', async () => { if (activeRoom) renderRoom((await post(`/api/rooms/${activeRoom.token}/pass`, {})).room); });
+$('askForm').addEventListener('submit', async (event) => { event.preventDefault(); const question = $('question').value.trim(); if (!question) return; $('question').value = ''; if (!activeRoom) return add('keeper', '请先选择单人或多人游玩。'); try { renderRoom((await post(`/api/rooms/${activeRoom.token}/ask`, { question })).room); } catch (error) { add('keeper', `木勺停住了：${error.message}`); } });
+loadStatus().catch((error) => { show($('gate'), true); setText('authHint', error.message); });
