@@ -13,6 +13,8 @@ const HOST = process.env.HOST || '0.0.0.0';
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const OPENAI_REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || '';
+const OPENAI_MAX_TOKENS = Number(process.env.OPENAI_MAX_TOKENS) || 0;
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'store.json');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_HOURS || 168) * 60 * 60 * 1000;
@@ -213,13 +215,20 @@ function systemPrompt() {
 
 async function askModel(messages, temperature = 0.75) {
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not configured');
+  const body = { model: OPENAI_MODEL, temperature, messages };
+  if (OPENAI_REASONING_EFFORT) {
+    body.reasoning_effort = OPENAI_REASONING_EFFORT;
+  }
+  if (OPENAI_MAX_TOKENS > 0) {
+    body.max_completion_tokens = OPENAI_MAX_TOKENS;
+  }
   const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${OPENAI_API_KEY}`,
     },
-    body: JSON.stringify({ model: OPENAI_MODEL, temperature, messages }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`model request failed: ${res.status} ${await res.text()}`);
   const json = await res.json();
@@ -414,6 +423,20 @@ app.get('/api/cases/:id', async (request, reply) => {
   const item = store.cases.find((candidate) => candidate.id === request.params.id && (candidate.visibility === 'public' || candidate.ownerId === user.id));
   if (!item) return reply.code(404).send({ error: '这锅汤不存在或无权查看。' });
   return { case: publicCase(item, true) };
+});
+
+app.delete('/api/cases/:id', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const result = await withStore(async (store) => {
+    const index = store.cases.findIndex((candidate) => candidate.id === request.params.id);
+    if (index < 0) return { status: 404, error: '这锅汤不存在。' };
+    if (store.cases[index].ownerId !== user.id) return { status: 403, error: '只能删除自己的海龟汤。' };
+    store.cases.splice(index, 1);
+    return { ok: true };
+  });
+  if (!result.ok) return reply.code(result.status).send({ error: result.error });
+  return { ok: true };
 });
 
 app.post('/api/cases/custom', async (request, reply) => {
