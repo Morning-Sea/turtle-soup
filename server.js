@@ -51,7 +51,7 @@ const fallbackCases = [
 ];
 
 function emptyStore() {
-  return { users: [], invites: [], sessions: [] };
+  return { users: [], invites: [], sessions: [], cases: [], rooms: [] };
 }
 
 async function readStore() {
@@ -93,6 +93,45 @@ function normalizeEmail(value) {
 function publicUser(user) {
   if (!user) return null;
   return { id: user.id, name: user.name, email: user.email, role: user.role };
+}
+
+function normalizeText(value, limit = 2000) {
+  return String(value || '').trim().replace(/\r\n/g, '\n').slice(0, limit);
+}
+
+function publicCase(item, includeTruth = false) {
+  const data = {
+    id: item.id,
+    title: item.title,
+    soup: item.soup,
+    visibility: item.visibility,
+    source: item.source || 'user',
+    ownerId: item.ownerId || null,
+    ownerName: item.ownerName || '匿名汤客',
+    createdAt: item.createdAt,
+  };
+  if (includeTruth) {
+    data.truth = item.truth;
+    data.rules = item.rules || [];
+  }
+  return data;
+}
+
+function publicRoom(room, user) {
+  const currentPlayerId = room.players[room.turnIndex % Math.max(room.players.length, 1)]?.id || null;
+  return {
+    id: room.id,
+    token: room.token,
+    inviteUrl: room.inviteUrl,
+    mode: room.mode,
+    case: { title: room.case.title, soup: room.case.soup },
+    players: room.players.map((player) => ({ id: player.id, name: player.name })),
+    currentPlayerId,
+    isMyTurn: Boolean(user && currentPlayerId === user.id),
+    history: room.history,
+    revealed: room.revealed ? room.case.truth : null,
+    createdAt: room.createdAt,
+  };
 }
 
 function validatePassword(password) {
@@ -325,6 +364,160 @@ app.post('/api/auth/register', async (request, reply) => {
   if (result.error) return reply.code(400).send({ error: result.error });
   setSessionCookie(reply, result.token);
   return { user: result.user };
+});
+
+
+app.get('/api/cases/community', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const store = await readStore();
+  const cases = store.cases
+    .filter((item) => item.visibility === 'public' || item.ownerId === user.id)
+    .slice(-60)
+    .reverse()
+    .map((item) => publicCase(item, item.ownerId === user.id));
+  return { cases };
+});
+
+
+app.get('/api/cases/:id', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const store = await readStore();
+  const item = store.cases.find((candidate) => candidate.id === request.params.id && (candidate.visibility === 'public' || candidate.ownerId === user.id));
+  if (!item) return reply.code(404).send({ error: '这锅汤不存在或无权查看。' });
+  return { case: publicCase(item, true) };
+});
+
+app.post('/api/cases/custom', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const title = normalizeName(request.body?.title || '无题之汤');
+  const soup = normalizeText(request.body?.soup, 1200);
+  const truth = normalizeText(request.body?.truth, 2000);
+  const visibility = request.body?.visibility === 'public' ? 'public' : 'private';
+  const rules = normalizeText(request.body?.rules || '', 600).split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 5);
+  if (!soup || !truth) return reply.code(400).send({ error: '请填写汤面和汤底。' });
+  const item = await withStore(async (store) => {
+    const saved = { id: crypto.randomUUID(), title, soup, truth, rules, visibility, source: 'user', ownerId: user.id, ownerName: user.name, createdAt: Date.now() };
+    store.cases.push(saved);
+    return saved;
+  });
+  return { case: publicCase(item, true) };
+});
+
+app.post('/api/rooms', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const selectedCase = request.body?.case;
+  const mode = request.body?.mode === 'multi' ? 'multi' : 'single';
+  if (!selectedCase?.soup || !selectedCase?.truth) return reply.code(400).send({ error: '请先选择或创建一锅完整的汤。' });
+  const token = makeToken(18);
+  const room = await withStore(async (store) => {
+    const item = {
+      id: crypto.randomUUID(),
+      token,
+      mode,
+      case: {
+        title: normalizeName(selectedCase.title || '无题之汤'),
+        soup: normalizeText(selectedCase.soup, 1200),
+        truth: normalizeText(selectedCase.truth, 2000),
+        rules: Array.isArray(selectedCase.rules) ? selectedCase.rules.slice(0, 5) : [],
+      },
+      players: [{ id: user.id, name: user.name }],
+      turnIndex: 0,
+      history: [{ role: 'keeper', content: mode === 'multi' ? '多人汤局已开。按座次轮流追问，轮到自己可提问或弃权。' : '汤已经上桌。请只用能回答“是/不是”的问题追问。' }],
+      revealed: false,
+      createdBy: user.id,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    item.inviteUrl = `${PUBLIC_BASE_URL || `${request.protocol}://${request.headers.host}`}/?room=${token}`;
+    store.rooms.push(item);
+    return item;
+  });
+  return { room: publicRoom(room, user) };
+});
+
+app.post('/api/rooms/:token/join', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const room = await withStore(async (store) => {
+    const item = store.rooms.find((candidate) => candidate.token === request.params.token);
+    if (!item) return null;
+    if (!item.players.some((player) => player.id === user.id)) item.players.push({ id: user.id, name: user.name });
+    item.updatedAt = Date.now();
+    return item;
+  });
+  if (!room) return reply.code(404).send({ error: '这桌汤局不存在或已经散席。' });
+  return { room: publicRoom(room, user) };
+});
+
+app.get('/api/rooms/:token', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const store = await readStore();
+  const room = store.rooms.find((candidate) => candidate.token === request.params.token);
+  if (!room) return reply.code(404).send({ error: '这桌汤局不存在或已经散席。' });
+  return { room: publicRoom(room, user) };
+});
+
+app.post('/api/rooms/:token/ask', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const question = normalizeText(request.body?.question, 300);
+  if (!question) return reply.code(400).send({ error: 'question is required' });
+  const store = await readStore();
+  const room = store.rooms.find((candidate) => candidate.token === request.params.token);
+  if (!room) return reply.code(404).send({ error: '这桌汤局不存在或已经散席。' });
+  const currentPlayer = room.players[room.turnIndex % room.players.length];
+  if (room.mode === 'multi' && currentPlayer?.id !== user.id) return reply.code(409).send({ error: '还没轮到你。' });
+  let answer;
+  if (!OPENAI_API_KEY) {
+    answer = /揭晓|答案|结束|真相/.test(question) ? `揭晓：${room.case.truth}` : '木勺停在碗沿：没有接入模型时，老板只能沉默地点头。请配置 OPENAI_API_KEY 后继续追问。';
+  } else {
+    const transcript = room.history.slice(-16).map((h) => `${h.role === 'player' ? h.name || '玩家' : '老板'}：${h.content}`).join('\n');
+    answer = await askModel([
+      { role: 'system', content: systemPrompt() },
+      { role: 'user', content: `题名：${room.case.title}\n题面：${room.case.soup}\n真相：${room.case.truth}\n边界：${(room.case.rules || []).join('；')}\n历史：\n${transcript}\n玩家新问题：${question}` },
+    ], 0.55);
+  }
+  const updated = await withStore(async (fresh) => {
+    const item = fresh.rooms.find((candidate) => candidate.token === request.params.token);
+    item.history.push({ role: 'player', userId: user.id, name: user.name, content: question, at: Date.now() });
+    item.history.push({ role: 'keeper', content: answer, at: Date.now() });
+    if (/揭晓|答案|结束|真相/.test(question)) item.revealed = true;
+    if (item.mode === 'multi' && item.players.length) item.turnIndex = (item.turnIndex + 1) % item.players.length;
+    item.updatedAt = Date.now();
+    return item;
+  });
+  return { room: publicRoom(updated, user) };
+});
+
+app.post('/api/rooms/:token/pass', async (request, reply) => {
+  const user = await requireAuth(request, reply);
+  if (!user) return null;
+  const room = await withStore(async (store) => {
+    const item = store.rooms.find((candidate) => candidate.token === request.params.token);
+    if (!item) return null;
+    const currentPlayer = item.players[item.turnIndex % item.players.length];
+    if (item.mode === 'multi' && currentPlayer?.id !== user.id) {
+      const error = new Error('还没轮到你。');
+      error.statusCode = 409;
+      throw error;
+    }
+    item.history.push({ role: 'player', userId: user.id, name: user.name, content: '弃权', at: Date.now(), skipped: true });
+    item.history.push({ role: 'keeper', content: '木勺轻敲碗沿，座次向下一位挪去。', at: Date.now() });
+    if (item.mode === 'multi' && item.players.length) item.turnIndex = (item.turnIndex + 1) % item.players.length;
+    item.updatedAt = Date.now();
+    return item;
+  }).catch((error) => {
+    if (error.statusCode) return { error };
+    throw error;
+  });
+  if (!room) return reply.code(404).send({ error: '这桌汤局不存在或已经散席。' });
+  if (room.error) return reply.code(room.error.statusCode).send({ error: room.error.message });
+  return { room: publicRoom(room, user) };
 });
 
 app.post('/api/case', async (request, reply) => {

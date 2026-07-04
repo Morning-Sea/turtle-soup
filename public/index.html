@@ -46,33 +46,62 @@
         </div>
       </section>
       <section id="inviteBox" class="invite-box hidden"></section>
-      <section class="panel setup">
-        <label>气质
-          <select id="mood">
-            <option>悬疑</option>
-            <option>温柔反转</option>
-            <option>都市怪谈</option>
-            <option>冷幽默</option>
-          </select>
-        </label>
-        <label>难度
-          <select id="difficulty">
-            <option>标准</option>
-            <option>入门</option>
-            <option>硬核</option>
-          </select>
-        </label>
-        <button id="newCase">开一锅新汤</button>
+      <section class="panel soup-library">
+        <div class="library-head">
+          <div>
+            <p class="eyebrow">SOUP SOURCE</p>
+            <h2>选择或创建一锅汤</h2>
+          </div>
+          <button id="refreshCommunity" class="ghost small">刷新社区</button>
+        </div>
+        <div class="setup">
+          <label>气质
+            <select id="mood">
+              <option>悬疑</option>
+              <option>温柔反转</option>
+              <option>都市怪谈</option>
+              <option>冷幽默</option>
+            </select>
+          </label>
+          <label>难度
+            <select id="difficulty">
+              <option>标准</option>
+              <option>入门</option>
+              <option>硬核</option>
+            </select>
+          </label>
+          <button id="newCase">AI / 本地开一锅</button>
+        </div>
+        <form id="customCaseForm" class="custom-case">
+          <label>题名<input id="customTitle" placeholder="例如：空椅子"></label>
+          <label>汤面<textarea id="customSoup" placeholder="玩家看到的题面"></textarea></label>
+          <label>汤底<textarea id="customTruth" placeholder="真正答案，AI 会据此主持"></textarea></label>
+          <label>边界规则<textarea id="customRules" placeholder="每行一条，可选"></textarea></label>
+          <label>可见性
+            <select id="customVisibility">
+              <option value="private">私有</option>
+              <option value="public">公开到社区</option>
+            </select>
+          </label>
+          <button>保存并选用</button>
+        </form>
+        <div id="communityCases" class="case-list"></div>
+      </section>
+      <section id="modePanel" class="panel mode-panel hidden">
+        <div><b>已选汤：</b><span id="selectedCaseName">未选择</span></div>
+        <button id="startSingle">单人游玩</button>
+        <button id="startMulti">邀请多人游玩</button>
       </section>
       <section class="case-card">
         <div class="case-top"><span id="source">等待开锅</span><button id="reveal">揭晓</button></div>
         <h2 id="title">请先开一锅新汤</h2>
         <p id="soup">老板正在擦拭木勺。</p>
       </section>
+      <section id="roomBar" class="room-bar hidden"></section>
       <section id="log" class="log" aria-live="polite"></section>
       <form id="askForm" class="ask">
         <input id="question" placeholder="例如：这个人是在害怕吗？" autocomplete="off">
-        <button>追问</button>
+        <button id="askButton">追问</button><button id="passTurn" class="ghost hidden" type="button">弃权</button>
       </form>
       <aside class="rules"><b>玩法</b><span>尽量问能用“是 / 不是”回答的问题。</span><span>卡住时问：这和地点、身份、时间、物品有关吗？</span></aside>
     </section>
