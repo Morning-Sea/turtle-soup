@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>夜渡汤馆</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">MIDNIGHT TURTLE SOUP</p>
+        <h1>夜渡汤馆</h1>
+        <p class="tagline">一盏灯，一碗汤。先验请帖，再入长夜；你只能问“是”与“不是”，把沉在碗底的真相捞出来。</p>
+      </div>
+      <div class="bowl" aria-hidden="true"><span></span></div>
+    </section>
+
+    <section id="gate" class="gate hidden">
+      <div class="gate-copy">
+        <p class="eyebrow" id="gateEyebrow">掌柜登记</p>
+        <h2 id="gateTitle">第一晚，只认一位掌柜</h2>
+        <p id="gateText">第一次打开汤馆时，请先登记管理员。之后所有来客都必须拿到你生成的一次性请帖。</p>
+      </div>
+      <form id="authForm" class="auth-card">
+        <label>名号<input id="authName" name="name" autocomplete="name" placeholder="例如：渡口掌柜"></label>
+        <label>邮箱<input id="authEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <label>暗号<input id="authPassword" name="password" type="password" autocomplete="current-password" placeholder="至少 12 位，混合多种字符"></label>
+        <input id="inviteToken" type="hidden">
+        <button id="authSubmit">登记掌柜</button>
+        <button id="loginSwitch" class="ghost" type="button">已有席位，改为登录</button>
+        <p id="authHint" class="hint">暗号会以强哈希保存；请帖一人一用。</p>
+      </form>
+    </section>
+
+    <section id="app" class="hidden">
+      <section class="toolbar">
+        <div>
+          <span id="userBadge">未入席</span>
+          <button id="logout" class="ghost small">离席</button>
+        </div>
+        <div id="adminTools" class="admin-tools hidden">
+          <input id="inviteNote" placeholder="请帖备注，例如：周末局">
+          <button id="createInvite">写一张请帖</button>
+        </div>
+      </section>
+      <section id="inviteBox" class="invite-box hidden"></section>
+      <section class="panel setup">
+        <label>气质
+          <select id="mood">
+            <option>悬疑</option>
+            <option>温柔反转</option>
+            <option>都市怪谈</option>
+            <option>冷幽默</option>
+          </select>
+        </label>
+        <label>难度
+          <select id="difficulty">
+            <option>标准</option>
+            <option>入门</option>
+            <option>硬核</option>
+          </select>
+        </label>
+        <button id="newCase">开一锅新汤</button>
+      </section>
+      <section class="case-card">
+        <div class="case-top"><span id="source">等待开锅</span><button id="reveal">揭晓</button></div>
+        <h2 id="title">请先开一锅新汤</h2>
+        <p id="soup">老板正在擦拭木勺。</p>
+      </section>
+      <section id="log" class="log" aria-live="polite"></section>
+      <form id="askForm" class="ask">
+        <input id="question" placeholder="例如：这个人是在害怕吗？" autocomplete="off">
+        <button>追问</button>
+      </form>
+      <aside class="rules"><b>玩法</b><span>尽量问能用“是 / 不是”回答的问题。</span><span>卡住时问：这和地点、身份、时间、物品有关吗？</span></aside>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
