@@ -16,7 +16,11 @@ function add(role, content, name = '') {
   $('log').scrollTop = $('log').scrollHeight;
 }
 async function request(url, options = {}) {
-  const res = await fetch(url, { credentials: 'same-origin', ...options, headers: { 'content-type': 'application/json', ...(options.headers || {}) } });
+  const headers = { ...(options.headers || {}) };
+  if (options.body !== undefined && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+    headers['content-type'] = 'application/json';
+  }
+  const res = await fetch(url, { credentials: 'same-origin', ...options, headers });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) throw new Error(data.error || text || '请求失败');
