@@ -121,6 +121,7 @@ async function loadAccountSummary() {
 function chooseCase(item) {
   selectedCase = item; activeRoom = null; clearInterval(roomPoll);
   setText('selectedCaseName', item.title || '无题之汤'); show($('modePanel'), true);
+  show($('saveSelectedCaseControls'), Boolean(item?.truth));
   setText('source', item.source === 'ai' ? '本锅现熬' : item.source === 'user' ? (item.visibility === 'public' ? '社区汤' : '私房汤') : '本地秘方');
   setText('title', item.title); setText('soup', item.soup); $('log').innerHTML = ''; show($('roomBar'), false);
   add('keeper', '已选好汤。请选择单人游玩，或开一桌多人汤局。');
@@ -135,6 +136,24 @@ async function saveCustomCase(event) {
   event.preventDefault();
   const data = await post('/api/cases/custom', { title: $('customTitle').value, soup: $('customSoup').value, truth: $('customTruth').value, rules: $('customRules').value, visibility: $('customVisibility').value });
   chooseCase(data.case); await loadCommunity(); event.target.reset();
+}
+async function saveSelectedCase(visibility) {
+  if (!selectedCase?.truth) return add('keeper', '请先选择一锅带汤底的汤。');
+  $('saveSelectedCase').disabled = true;
+  try {
+    const data = await post('/api/cases/custom', {
+      title: selectedCase.title,
+      soup: selectedCase.soup,
+      truth: selectedCase.truth,
+      rules: Array.isArray(selectedCase.rules) ? selectedCase.rules.join('\n') : selectedCase.rules,
+      visibility,
+      source: selectedCase.source,
+    });
+    chooseCase(data.case);
+    await loadCommunity();
+    add('keeper', `这锅汤已保存为${data.case.visibility === 'public' ? '公开' : '私有'}。`);
+  } catch (error) { add('keeper', `保存失败：${error.message}`); }
+  finally { $('saveSelectedCase').disabled = false; }
 }
 async function loadCommunity() {
   const box = $('communityCases'); box.innerHTML = '<span class="hint">正在翻社区汤谱……</span>';
@@ -170,7 +189,7 @@ async function startRoom(playMode) {
 async function joinRoom(token) { const data = await post(`/api/rooms/${token}/join`, {}); renderRoom(data.room); startPolling(token); }
 function startPolling(token) { clearInterval(roomPoll); roomPoll = setInterval(async () => { try { renderRoom((await request(`/api/rooms/${token}`)).room, true); } catch {} }, 3000); }
 function renderRoom(room, silent = false) {
-  activeRoom = room; selectedCase = null; show($('modePanel'), false); show($('roomBar'), true);
+  activeRoom = room; selectedCase = null; show($('modePanel'), false); show($('saveSelectedCaseControls'), false); show($('roomBar'), true);
   setText('source', room.mode === 'multi' ? '多人汤局' : '单人汤局'); setText('title', room.case.title); setText('soup', room.case.soup);
   $('roomBar').innerHTML = `<b>${room.mode === 'multi' ? '多人' : '单人'}模式</b><span>座次：${room.players.map((p) => p.name).join(' → ') || '等待入席'}</span>${room.mode === 'multi' ? `<code>${room.inviteUrl}</code>` : ''}<span>${room.isMyTurn ? '轮到你了' : '等待别人提问'}</span>`;
   $('log').innerHTML = ''; room.history.forEach((item) => add(item.role, item.content, item.role === 'player' ? item.name : ''));
@@ -191,6 +210,7 @@ $('closeAccount').addEventListener('click', () => show($('accountPanel'), false)
 $('logout').addEventListener('click', async () => { await post('/api/auth/logout', {}); currentUser = null; activeRoom = null; clearInterval(roomPoll); await loadStatus(); });
 $('createInvite').addEventListener('click', createInvite); $('newCase').addEventListener('click', newCase); $('refreshCommunity').addEventListener('click', loadCommunity); $('customCaseForm').addEventListener('submit', saveCustomCase);
 $('startSingle').addEventListener('click', () => startRoom('single')); $('startMulti').addEventListener('click', () => startRoom('multi'));
+$('saveSelectedCase').addEventListener('click', () => saveSelectedCase($('selectedCaseVisibility').value));
 $('reveal').addEventListener('click', () => { if (activeRoom?.revealed) add('keeper', `揭晓：${activeRoom.revealed}`); else if (selectedCase) add('keeper', `揭晓：${selectedCase.truth}`); else add('keeper', '请在追问框输入“揭晓答案”，由老板揭开汤底。'); });
 $('passTurn').addEventListener('click', async () => { if (activeRoom) renderRoom((await post(`/api/rooms/${activeRoom.token}/pass`, {})).room); });
 $('askForm').addEventListener('submit', async (event) => { event.preventDefault(); const question = $('question').value.trim(); if (!question) return; $('question').value = ''; if (!activeRoom) return add('keeper', '请先选择单人或多人游玩。'); try { renderRoom((await post(`/api/rooms/${activeRoom.token}/ask`, { question })).room); } catch (error) { add('keeper', `木勺停住了：${error.message}`); } });
