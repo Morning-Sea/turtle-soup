@@ -39,6 +39,7 @@
         <div>
           <span id="userBadge">未入席</span>
           <button id="accountButton" class="ghost small" type="button">我的账户</button>
+          <button id="userAdminButton" class="ghost small hidden" type="button">用户管理</button>
           <button id="logout" class="ghost small">离席</button>
         </div>
         <div id="adminTools" class="admin-tools hidden">
@@ -56,6 +57,16 @@
           <button id="closeAccount" class="ghost small" type="button">收起</button>
         </div>
         <div id="accountSummary" class="account-summary"><span class="hint">点击“我的账户”查看你的汤谱与汤局记录。</span></div>
+      </section>
+      <section id="userAdminPanel" class="panel account-panel hidden">
+        <div class="account-head">
+          <div>
+            <p class="eyebrow">USER MANAGEMENT</p>
+            <h2>用户管理</h2>
+          </div>
+          <button id="closeUserAdmin" class="ghost small" type="button">收起</button>
+        </div>
+        <div id="userAdminSummary" class="account-summary"><span class="hint">掌柜可查看所有用户，以及他们提交到社区的海龟汤记录。</span></div>
       </section>
       <section class="panel soup-library">
         <div class="library-head">

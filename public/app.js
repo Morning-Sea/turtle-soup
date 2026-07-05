@@ -16,7 +16,11 @@ function add(role, content, name = '') {
   $('log').scrollTop = $('log').scrollHeight;
 }
 async function request(url, options = {}) {
-  const res = await fetch(url, { credentials: 'same-origin', ...options, headers: { 'content-type': 'application/json', ...(options.headers || {}) } });
+  const headers = { ...(options.headers || {}) };
+  if (options.body !== undefined && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+    headers['content-type'] = 'application/json';
+  }
+  const res = await fetch(url, { credentials: 'same-origin', ...options, headers });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) throw new Error(data.error || text || '请求失败');
@@ -47,7 +51,7 @@ function configureGate(status) {
 
 async function enterApp(user) {
   currentUser = user; show($('gate'), false); show($('app'), true);
-  setText('userBadge', `${user.name} · ${user.role === 'admin' ? '掌柜' : '来客'}`); show($('adminTools'), user.role === 'admin');
+  setText('userBadge', `${user.name} · ${user.role === 'admin' ? '掌柜' : '来客'}`); show($('adminTools'), user.role === 'admin'); show($('userAdminButton'), user.role === 'admin');
   await loadCommunity();
   if (params.get('room')) await joinRoom(params.get('room'));
 }
@@ -115,6 +119,55 @@ async function loadAccountSummary() {
   show(panel, true);
   box.innerHTML = '<span class="hint">正在翻你的账册……</span>';
   try { renderAccountSummary(await request('/api/account/summary')); }
+  catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
+}
+
+
+function renderUserAdmin(data) {
+  const box = $('userAdminSummary');
+  const users = data.users || [];
+  box.innerHTML = users.length ? users.map((user) => `
+    <article class="user-admin-card">
+      <div class="user-admin-head">
+        <div>
+          <b>${escapeHtml(user.name)}</b>
+          <span>${escapeHtml(user.email)}</span>
+        </div>
+        <small>${user.role === 'admin' ? '掌柜' : '来客'} · 入席 ${formatDate(user.createdAt)}</small>
+      </div>
+      <div class="account-stats">
+        <div class="stat-card"><span>上传总数</span><b>${user.caseCounts.total}</b></div>
+        <div class="stat-card"><span>提交到社区</span><b>${user.caseCounts.public}</b></div>
+        <div class="stat-card"><span>私有汤</span><b>${user.caseCounts.private}</b></div>
+        <div class="stat-card"><span>相关汤局</span><b>${user.roomCounts.total}</b><small>创建 ${user.roomCounts.created} · 参与 ${user.roomCounts.participated}</small></div>
+      </div>
+      <div class="account-recent">
+        <h3>提交到社区的海龟汤</h3>
+        <div class="account-case-list">
+          ${user.communityCases.length ? user.communityCases.map((item) => `
+            <button class="account-case ghost" type="button" data-case-id="${item.id}">
+              <b>${escapeHtml(item.title)}</b>
+              <span>${escapeHtml(item.soup)}</span>
+              <small>${escapeHtml(item.ownerName)} · ${formatDate(item.createdAt)}</small>
+            </button>
+          `).join('') : '<span class="hint">这个用户还没有提交公开海龟汤。</span>'}
+        </div>
+      </div>
+    </article>
+  `).join('') : '<span class="hint">还没有用户。</span>';
+  box.querySelectorAll('[data-case-id]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try { chooseCase((await request(`/api/cases/${button.dataset.caseId}`)).case); show($('userAdminPanel'), false); }
+      catch (error) { alert(error.message); }
+    });
+  });
+}
+async function loadUserAdmin() {
+  const panel = $('userAdminPanel');
+  const box = $('userAdminSummary');
+  show(panel, true);
+  box.innerHTML = '<span class="hint">正在翻用户账册……</span>';
+  try { renderUserAdmin(await request('/api/admin/users')); }
   catch (error) { box.innerHTML = `<span class="hint">${escapeHtml(error.message)}</span>`; }
 }
 
@@ -206,7 +259,9 @@ async function createInvite() {
 $('authForm').addEventListener('submit', submitAuth);
 $('loginSwitch').addEventListener('click', () => { if (mode === 'login') { const token = prompt('贴上掌柜给你的请帖链接或尾码'); if (token) { const parsed = token.includes('invite=') ? new URL(token).searchParams.get('invite') : token.trim(); $('inviteToken').value = parsed; params.set('invite', parsed); configureGate({ hasAdmin: true }); } return; } params.delete('invite'); configureGate({ hasAdmin: true }); });
 $('accountButton').addEventListener('click', loadAccountSummary);
+$('userAdminButton').addEventListener('click', loadUserAdmin);
 $('closeAccount').addEventListener('click', () => show($('accountPanel'), false));
+$('closeUserAdmin').addEventListener('click', () => show($('userAdminPanel'), false));
 $('logout').addEventListener('click', async () => { await post('/api/auth/logout', {}); currentUser = null; activeRoom = null; clearInterval(roomPoll); await loadStatus(); });
 $('createInvite').addEventListener('click', createInvite); $('newCase').addEventListener('click', newCase); $('refreshCommunity').addEventListener('click', loadCommunity); $('customCaseForm').addEventListener('submit', saveCustomCase);
 $('startSingle').addEventListener('click', () => startRoom('single')); $('startMulti').addEventListener('click', () => startRoom('multi'));
