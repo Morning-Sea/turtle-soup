@@ -4,13 +4,14 @@
 
 ## 功能
 
-- OpenAI 兼容 `/chat/completions` API：可配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`。
+- OpenAI 兼容 `/chat/completions` API：可配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_REASONING_EFFORT`、`OPENAI_MAX_TOKENS`。
 - 首次访问先注册管理员；之后由管理员创建一次性分享链接邀请玩家注册。
 - 安全登录：密码使用 Node.js `scrypt` 强哈希与随机盐保存；会话使用高熵随机 token、HttpOnly、SameSite Cookie；登录/注册有基础限速。
-- AI 生成原创题面、谜底和边界规则。
-- 用户可自建海龟汤，保存为私有汤，或公开到社区供其他人选择游玩。
+- AI 生成原创题面、谜底和边界规则；生成后可保存为私有汤，或公开上传到社区。
+- 用户可自建海龟汤，保存为私有汤，或公开到社区供其他人选择游玩；自己上传到社区的海龟汤可删除。
 - 可从社区汤谱选择已有海龟汤，也可使用 AI / 本地题库即时开局。
 - 支持单人游玩与多人邀请房间；多人模式按座次轮流向 AI 提问，轮到自己时可以追问或弃权。
+- 管理员可在用户管理页查看所有用户，以及每位用户提交到社区的海龟汤记录。
 - 经典海龟汤追问流程：玩家提问，主持人只给“是 / 不是 / 无关 / 接近”等克制回答。
 - 未配置密钥时自动使用本地题库，方便先部署验证。
 
@@ -40,6 +41,8 @@ docker run -d --name turtle-soup --restart unless-stopped \
   -e OPENAI_BASE_URL=https://api.openai.com/v1 \
   -e OPENAI_API_KEY=你的密钥 \
   -e OPENAI_MODEL=gpt-4o-mini \
+  -e OPENAI_REASONING_EFFORT=medium \
+  -e OPENAI_MAX_TOKENS=1200 \
   turtle-soup
 ```
 
@@ -51,6 +54,14 @@ DATA_FILE=./data/store.json OPENAI_API_KEY=你的密钥 OPENAI_MODEL=gpt-4o-mini
 ```
 
 建议使用 Nginx/Caddy 反向代理到 `127.0.0.1:3000`，并开启 HTTPS。生产环境开启 HTTPS 时请保持 `COOKIE_SECURE=true`，并把 `PUBLIC_BASE_URL` 设置成你的公网 HTTPS 域名，这样生成的请帖链接会直接可用。
+
+### AI 参数
+
+- `OPENAI_BASE_URL`：OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`。
+- `OPENAI_API_KEY`：模型密钥；未配置时会使用内置本地题库。
+- `OPENAI_MODEL`：模型名称，默认 `gpt-4o-mini`。
+- `OPENAI_REASONING_EFFORT`：传给兼容接口的 `reasoning_effort`，可作为支持推理模型的思考预算/推理强度控制参数；留空则不发送。
+- `OPENAI_MAX_TOKENS`：传给兼容接口的 `max_completion_tokens`，用于限制单次生成的最大输出 token；小于等于 0 时不发送。
 
 ## 账号与请帖
 
