@@ -377,6 +377,44 @@ app.post('/api/auth/register', async (request, reply) => {
 
 
 
+
+app.get('/api/admin/users', async (request, reply) => {
+  const admin = await requireAdmin(request, reply);
+  if (!admin) return null;
+  const store = await readStore();
+  return {
+    users: store.users
+      .slice()
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .map((user) => {
+        const userCases = store.cases.filter((item) => item.ownerId === user.id);
+        const communityCases = userCases
+          .filter((item) => item.visibility === 'public')
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+          .map((item) => publicCase(item, true));
+        const relatedRooms = store.rooms.filter((room) => room.createdBy === user.id || room.players?.some((player) => player.id === user.id));
+        return {
+          ...publicUser(user),
+          createdAt: user.createdAt,
+          lastSeenAt: store.sessions
+            .filter((session) => session.userId === user.id)
+            .reduce((latest, session) => Math.max(latest, session.lastSeenAt || 0), 0),
+          caseCounts: {
+            total: userCases.length,
+            public: communityCases.length,
+            private: userCases.filter((item) => item.visibility !== 'public').length,
+          },
+          roomCounts: {
+            total: relatedRooms.length,
+            created: store.rooms.filter((room) => room.createdBy === user.id).length,
+            participated: store.rooms.filter((room) => room.players?.some((player) => player.id === user.id)).length,
+          },
+          communityCases,
+        };
+      }),
+  };
+});
+
 app.get('/api/account/summary', async (request, reply) => {
   const user = await requireAuth(request, reply);
   if (!user) return null;
@@ -535,6 +573,7 @@ app.post('/api/rooms/:token/ask', async (request, reply) => {
   }
   const updated = await withStore(async (fresh) => {
     const item = fresh.rooms.find((candidate) => candidate.token === request.params.token);
+    if (!item) return null;
     item.history.push({ role: 'player', userId: user.id, name: user.name, content: question, at: Date.now() });
     item.history.push({ role: 'keeper', content: answer, at: Date.now() });
     if (/揭晓|答案|结束|真相/.test(question)) item.revealed = true;
@@ -542,6 +581,7 @@ app.post('/api/rooms/:token/ask', async (request, reply) => {
     item.updatedAt = Date.now();
     return item;
   });
+  if (!updated) return reply.code(404).send({ error: '这桌汤局不存在或已经散席。' });
   return { room: publicRoom(updated, user) };
 });
 
